@@ -382,7 +382,49 @@ def script_json(obj) -> str:
             .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
 
 
-def render_row(r: dict, review_below: float) -> str:
+def load_review(path: Path) -> dict | None:
+    """Read a MISTAKES file (the format the page exports), so the page can show the human
+    verdicts next to Clef's. Entries the parser can't read are skipped, not guessed."""
+    if not path.exists():
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    review = {"file": path.name, "complete": "checked by hand: all" in text.lower(), "items": {}}
+    section, current = "mistakes", None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            section = "agreed" if "agree" in stripped.lower() else "mistakes"
+            current = None
+            continue
+        heading = re.match(r"###\s*Comment\s+#?(\d+)\b(.*)$", stripped, flags=re.IGNORECASE)
+        if heading:
+            current = {"kind": "wrong" if section == "mistakes" else "agreed",
+                       "borderline": section == "agreed" or "borderline" in heading.group(2).lower(),
+                       "label": None, "why": ""}
+            review["items"][int(heading.group(1))] = current
+            continue
+        field = re.match(r"[-*]\s*(?:\*\*)?\s*(should be|why[^:*]*)\s*:?\s*(?:\*\*)?\s*:?\s*(.*)$",
+                         stripped, flags=re.IGNORECASE)
+        if current is not None and field:
+            name, value = field.group(1).lower(), field.group(2).strip()
+            if name.startswith("should"):
+                label = value.lower().strip(" .*_`")
+                current["label"] = label if label in LABELS else None
+            elif "reason missing" not in value:
+                current["why"] = value
+    review["items"] = {k: v for k, v in review["items"].items()
+                       if v["kind"] == "agreed" or v["label"]}
+    return review
+
+
+def human_verdict(r: dict, review: dict | None) -> dict | None:
+    item = (review or {}).get("items", {}).get(r["id"])
+    if item and item["kind"] == "wrong" and item["label"] == r.get("label"):
+        return None  # "should be" the same label Clef gave: not a mistake
+    return item
+
+
+def render_row(r: dict, review_below: float, review: dict | None = None) -> str:
     label = r.get("label") if r.get("label") in LABELS else None
     conf = r.get("confidence")
     low = label is not None and conf is not None and conf < review_below
@@ -406,19 +448,33 @@ def render_row(r: dict, review_below: float) -> str:
         conf_html = flag = ""
         probs_html = f'<div class="p errmsg">{esc(r.get("error"))}</div>'
 
+    human, wrong = "", False
+    verdict = human_verdict(r, review)
+    if verdict:
+        why = f'<span class="why">{esc(verdict["why"])}</span>' if verdict["why"] else ""
+        border = ' <span class="bl">borderline</span>' if verdict["borderline"] else ""
+        if verdict["kind"] == "wrong":
+            wrong = True
+            classes.append("wrong")
+            human = (f'<div class="hr"><span class="hrk">Human review:</span> should be '
+                     f'<span class="hl {esc(verdict["label"])}">{esc(verdict["label"])}</span>'
+                     f'{border}{why}</div>')
+        else:
+            human = f'<div class="hr agree"><span class="hrk">Human review:</span> agrees{border}{why}</div>'
+
     return (
         f'<article class="{" ".join(classes)}" data-id="{esc(r["id"])}" '
         f'data-label="{esc(label or "error")}" data-conf="{conf if conf is not None else 2}" '
-        f'data-low="{1 if low else 0}">'
+        f'data-low="{1 if low else 0}" data-wrong="{1 if wrong else 0}">'
         f'<div class="v"><span class="num">#{esc(r["id"])}</span>{badge}{conf_html}{flag}</div>'
         f'<div class="c"><p class="text">{esc(r["comment"])}</p>'
         f'<p class="meta"><span>{esc(r.get("thread"))}</span><span>{esc(r.get("author"))}</span>'
-        f'<time>{esc(fmt_time(r.get("posted_at")))}</time></p></div>'
+        f'<time>{esc(fmt_time(r.get("posted_at")))}</time></p>{human}</div>'
         f'{probs_html}</article>'
     )
 
 
-def render_html(output: dict) -> str:
+def render_html(output: dict, review: dict | None = None) -> str:
     meta, results = output["meta"], output["results"]
     review_below = meta.get("review_below", REVIEW_BELOW)
     counts = {k: sum(1 for r in results if r.get("label") == k) for k in LABELS}
@@ -438,6 +494,14 @@ def render_html(output: dict) -> str:
     if errors:
         chips.append(f'<button class="chip error" data-filter="error" aria-pressed="false">'
                      f'Errors <b>{errors}</b></button>')
+    n_wrong = sum(1 for r in results if (human_verdict(r, review) or {}).get("kind") == "wrong")
+    human_info = ""
+    if review:
+        chips.append(f'<button class="chip wrongc" data-filter="wrong" aria-pressed="false">'
+                     f'✗ Clef wrong <b>{n_wrong}</b></button>')
+        human_info = (f'<div><dt>Human review</dt><dd>Clef wrong on {n_wrong} of {total}</dd></div>'
+                      if review["complete"] else
+                      f'<div><dt>Human review</dt><dd>{n_wrong} mistakes so far (incomplete)</dd></div>')
     chips.append('<button class="chip rvonly" data-filter="unreviewed" aria-pressed="false" hidden>'
                  'Not reviewed <b id="nUnrev">0</b></button>')
     chips.append('<button class="chip rvonly" data-filter="disagree" aria-pressed="false" hidden>'
@@ -470,7 +534,8 @@ def render_html(output: dict) -> str:
         "{{CRITERIA_ROWS}}": criteria_rows,
         "{{REVIEW_BELOW}}": esc(review_below),
         "{{MISTAKES_FILE}}": esc(meta.get("mistakes_file", "MISTAKES.md")),
-        "{{ROWS}}": "\n".join(render_row(r, review_below) for r in results),
+        "{{HUMAN_INFO}}": human_info,
+        "{{ROWS}}": "\n".join(render_row(r, review_below, review) for r in results),
         "{{DATA}}": script_json(data),
     }
     page = HTML_TEMPLATE
@@ -511,6 +576,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -599,6 +665,16 @@ main { padding-top: 12px; padding-bottom: 40px; }
 .pr.acceptable .pbar span { background: var(--acceptable); } .pr.toxic .pbar span { background: var(--toxic); } .pr.spam .pbar span { background: var(--spam); }
 .pv { text-align: right; font-variant-numeric: tabular-nums; }
 .errmsg { color: var(--toxic); font-size: 12px; overflow-wrap: anywhere; }
+.hr { margin-top: 8px; font-size: 13px; background: var(--mine-bg); border-radius: 8px; padding: 7px 10px; }
+.hr .hrk { font-weight: 700; color: var(--mine); }
+.hr .hl { font-weight: 700; text-transform: uppercase; font-size: 12px; letter-spacing: .04em; }
+.hr .hl.acceptable { color: var(--acceptable); } .hr .hl.toxic { color: var(--toxic); } .hr .hl.spam { color: var(--spam); }
+.hr .bl { font-size: 11px; font-weight: 700; color: var(--flag); background: var(--flag-bg); border-radius: 5px; padding: 1px 6px; margin-left: 4px; }
+.hr .why { display: block; margin-top: 3px; color: var(--text); overflow-wrap: anywhere; }
+.row.wrong .badge { text-decoration: line-through; text-decoration-thickness: 2px; }
+.chip.wrongc { color: var(--mine); } .chip.wrongc.on { background: var(--mine); color: var(--on-mine); border-color: var(--mine); }
+body.blind .row:not(.picked) .hr { display: none; }
+body.blind .row:not(.picked).wrong .badge { text-decoration: none; }
 .empty { text-align: center; color: var(--muted); padding: 30px 0; }
 footer.foot { color: var(--faint); font-size: 12px; padding-bottom: 30px; }
 
@@ -648,6 +724,7 @@ footer.foot { color: var(--faint); font-size: 12px; padding-bottom: 30px; }
       <div><dt>Comments</dt><dd>{{INPUT}}</dd></div>
       <div><dt>Model</dt><dd>{{MODEL}}</dd></div>
       <div><dt>Criteria</dt><dd>{{CRITERIA_VERSION}}</dd></div>
+      {{HUMAN_INFO}}
       <div><dt>Run</dt><dd><time class="runat" datetime="{{RUN_AT_ISO}}">{{RUN_AT}}</time></dd></div>
     </dl>
     <div class="dist" aria-hidden="true">{{DIST}}</div>
@@ -737,6 +814,7 @@ footer.foot { color: var(--faint); font-size: 12px; padding-bottom: 30px; }
   function matches(row) {
     const id = row.dataset.id, label = row.dataset.label, f = state.filter;
     if (f === "low" && row.dataset.low !== "1") return false;
+    if (f === "wrong" && row.dataset.wrong !== "1") return false;
     if ((LABELS.includes(f) || f === "error") && label !== f) return false;
     if (f === "unreviewed" && mine(id)) return false;
     if (f === "disagree" && !(mine(id) && mine(id) !== label)) return false;
@@ -1013,7 +1091,8 @@ def main(argv: list[str] | None = None) -> int:
                                  encoding="utf-8")
             if progress_file.exists() and not any(r.get("error") for r in results):
                 progress_file.unlink()
-        html_path.write_text(render_html(output), encoding="utf-8")
+        review = load_review(HERE / run["mistakes"])
+        html_path.write_text(render_html(output, review), encoding="utf-8")
     except FatalError as err:
         print(f"\nError: {err}", file=sys.stderr)
         return 2
@@ -1024,6 +1103,11 @@ def main(argv: list[str] | None = None) -> int:
     review_below = output["meta"].get("review_below", REVIEW_BELOW)
     print(summarise(output["results"], review_below))
     print(f"Wrote {html_path.name}" + ("" if args.html_only else f" and {json_path.name}"))
+    if review:
+        n_wrong = sum(1 for r in output["results"]
+                      if (human_verdict(r, review) or {}).get("kind") == "wrong")
+        print(f"The page shows the human review from {review['file']}: Clef wrong on {n_wrong}"
+              + ("" if review["complete"] else " (review incomplete)"))
     if RETRIES["count"]:
         print(f"({RETRIES['count']} requests were retried after rate limits, server errors or "
               f"timeouts)")
