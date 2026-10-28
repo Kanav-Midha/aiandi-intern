@@ -2,3 +2,4 @@ cloud-flare.local.sh
 .env
 __pycache__/
 .venv/
+*.partial.jsonl
