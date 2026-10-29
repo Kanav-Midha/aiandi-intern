@@ -3,3 +3,4 @@ cloud-flare.local.sh
 __pycache__/
 .venv/
 *.partial.jsonl
+.DS_Store
