@@ -92,8 +92,54 @@ CRITERIA = {
         },
     },
 }
-# v2 starts from the v1 criteria; refine it after reviewing the v1 mistakes.
-CRITERIA["v2"] = CRITERIA["v1"]
+# v2: revised after checking clef-flash's labels on comments.json by hand (MISTAKES.md). All
+# of its mistakes let toxic comments through: an insult inside a complaint about grading, a
+# sweeping claim that a whole group of students cheat, and a put-down softened with "lol"/"bro".
+# v2 says explicitly that these are toxic, and draws the line between harsh criticism of the
+# work (acceptable) and attacks on the person (toxic). It also says that a genuine-looking
+# post that advertises something is still spam, and that sharing your own project for
+# classmates to test is not.
+CRITERIA["v2"] = {
+    "instructions": CRITERIA["v1"]["instructions"] + (
+        " Judge the comment as a whole: if it criticises something and also insults or belittles "
+        "a person, it is toxic; casual words such as 'lol' or 'bro', or emojis, do not make a "
+        "put-down friendly; posting another person's phone number, address or room without "
+        "their consent is toxic even when it sounds helpful; and if a genuine-looking post also "
+        "advertises a paid service or asks people to get in touch for a deal, it is spam."
+    ),
+    "criteria": {
+        "acceptable": (
+            "Leave it up. A genuine post by a student: a question, answer, tip or explanation; "
+            "sharing their own work and asking classmates to try or test it, or sharing a "
+            "relevant free resource or link; feedback, complaints or criticism about the course, "
+            "the grading, the deadlines, the platform or the AI tools, even if harsh or "
+            "frustrated, as long as it is aimed at the work or the decision and not at a person; "
+            "jokes, casual or off-topic chat, and friendly teasing that does not belittle anyone; "
+            "swearing that is not aimed at a person; quoting something offensive (for example "
+            "what a chatbot replied) in order to report or discuss it. Disagreeing with someone "
+            "is acceptable as long as it does not insult them."
+        ),
+        "toxic": (
+            "Remove it because it attacks or demeans people: insults, name-calling, slurs or "
+            "put-downs aimed at a person or group (another student, a TA or the instructor), "
+            "including inside a complaint, such as calling someone clueless or useless, or "
+            "saying they should quit or are not cut out for their course; mocking someone's "
+            "struggles, intelligence, looks, gender, caste, religion, region, language or "
+            "background; sweeping negative claims about a group of people, such as everyone "
+            "from a hostel, branch, college, state or community, for example that they all "
+            "cheat, that it is in their nature, or that they only get marks or success unfairly; "
+            "threats, intimidation or harassment; sexual remarks about someone; telling someone "
+            "to hurt themselves; or posting someone's private details such as a phone number or "
+            "address. Still toxic when phrased as a joke, as sarcasm, with 'lol' or 'bro', or in "
+            "Hinglish. Criticising an idea, the work, the course or a tool is not toxic, and "
+            "neither is quoting offensive text in order to report it."
+        ),
+        "spam": CRITERIA["v1"]["criteria"]["spam"] + (
+            " A post that mixes some genuine content with an advert for a paid service or "
+            "product, or a 'DM me' offer, is still spam."
+        ),
+    },
+}
 
 # review_below: answers with confidence below this are flagged for a human look. clef-flash's
 # confidence runs lower than clef's (median 0.47 on comments.json), so its cut-off is lower:
