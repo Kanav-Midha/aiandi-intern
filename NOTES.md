@@ -63,4 +63,4 @@ reacted to the reported stereotype; and send low-confidence answers to a human f
 
 ## What I felt about doing this
 
-<!-- KANAV: replace this line with 3–5 sentences in your own words. -->
+When evaluating the comments, I did find the process itself tedious although there were some tricky cases that called for careful deliberation. Sometimes what I found at first glance was changed by the context, particularly those cases where sarcasm, insults, and useful advice were combined with advertising messages. I discovered also that harsh language, smileys, or hyperlinks do not solely determine whether to find any comments suitable for banning. I want to take the patterns I have found in my daily checks and apply them to improving AI instructions and speeding up routine checks, but still making sure its decisions are carefully checked.
